@@ -1,0 +1,20 @@
+{
+  "name": "leaps-scanner-server",
+  "version": "1.0.0",
+  "description": "Backend server for LEAPS Scanner - Fast options data fetching via Yahoo Finance",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
+    "express": "^4.18.2",
+    "yahoo-finance2": "^2.11.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
