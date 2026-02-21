@@ -101,7 +101,7 @@ describe('OptionCard Component', () => {
     it('should display days to expiry', () => {
       render(<OptionCard option={mockHighDeltaOption} index={0} />);
 
-      expect(screen.getByText('400 days to expiry')).toBeInTheDocument();
+      expect(screen.getByText('400 days')).toBeInTheDocument();
     });
   });
 

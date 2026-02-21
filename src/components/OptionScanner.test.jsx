@@ -32,7 +32,12 @@ vi.mock('../services/optionsApi', () => ({
   getApiProvider: vi.fn(() => 'mock'),
   batchScanTickers: vi.fn(),
   calculateLeapsScore: vi.fn(() => 10),
-  getTopScoredOptions: vi.fn((options) => options.slice(0, 50))
+  getTopScoredOptions: vi.fn((options) => options.slice(0, 50)),
+  checkDataSourceAvailability: vi.fn(() => Promise.resolve({
+    polygon: { available: true, message: 'OK' },
+    yahoo: { available: true, message: 'OK' },
+    finnhub: { available: true, message: 'OK' }
+  }))
 }));
 
 // Mock the stock universe

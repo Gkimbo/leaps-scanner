@@ -87,19 +87,29 @@ const calculateRecommendation = (option) => {
   const scores = {
     probScore: Math.min(100, probProfit * 1.2),
     rrScore: Math.min(100, Math.max(0, riskRewardRatio) * 40),
-    erScore: Math.min(100, Math.max(0, 50 + expectedReturn * 0.5)),
+    erScore: Math.min(100, Math.max(0, 50 + Math.min(expectedReturn, 100) * 0.5)),
     timeEfficiency: timeValue <= 0 ? 100 : Math.max(0, 100 - (timeValue / premium) * 100),
     breakEvenScore: distanceToBreakEven <= 0 ? 100 : Math.max(0, 100 - distanceToBreakEven * 5)
   };
 
-  // Calculate weighted score
-  const score = (
-    scores.probScore * 0.30 +
-    scores.rrScore * 0.25 +
-    scores.erScore * 0.20 +
+  // Calculate weighted score (probability weighted more heavily)
+  let score = (
+    scores.probScore * 0.40 +
+    scores.rrScore * 0.20 +
+    scores.erScore * 0.15 +
     scores.timeEfficiency * 0.15 +
     scores.breakEvenScore * 0.10
   );
+
+  // Cap score based on probability thresholds
+  // High scores should require reasonable probability
+  if (probProfit < 30) {
+    score = Math.min(score, 45);
+  } else if (probProfit < 40) {
+    score = Math.min(score, 60);
+  } else if (probProfit < 50) {
+    score = Math.min(score, 75);
+  }
 
   // Determine recommendation
   let recommendation;

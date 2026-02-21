@@ -227,8 +227,11 @@ async function fetchYahooOptions(ticker, optionType, retryCount = 0) {
         const daysToExpiration = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
 
         options.forEach(opt => {
+          // Skip invalid options with zero or missing strike price
+          if (!opt.strike || opt.strike <= 0) return;
+
           // Calculate approximate delta based on moneyness (Yahoo doesn't provide Greeks)
-          const moneyness = underlyingPrice / opt.strike;
+          const moneyness = underlyingPrice > 0 ? underlyingPrice / opt.strike : 1;
           let estimatedDelta;
 
           if (optionType === 'call') {
@@ -251,12 +254,13 @@ async function fetchYahooOptions(ticker, optionType, retryCount = 0) {
           const premium = (bid + ask) / 2 || opt.lastPrice || 0;
 
           // Estimate IV (simplified - real calculation would use Black-Scholes)
-          const yearsToExpiry = daysToExpiration / 365;
+          const yearsToExpiry = Math.max(daysToExpiration / 365, 0.01); // Prevent division by zero
           const intrinsicValue = optionType === 'call'
             ? Math.max(0, underlyingPrice - opt.strike)
             : Math.max(0, opt.strike - underlyingPrice);
           const timeValue = Math.max(0, premium - intrinsicValue);
-          const estimatedIV = timeValue / (underlyingPrice * Math.sqrt(yearsToExpiry) * 0.4) || 0.3;
+          const ivDenominator = underlyingPrice * Math.sqrt(yearsToExpiry) * 0.4;
+          const estimatedIV = ivDenominator > 0 ? timeValue / ivDenominator : 0.3;
 
           // Determine if unusual volume
           const avgVolume = (opt.openInterest || 1000) / 30;
@@ -714,9 +718,9 @@ async function fetchPolygonOptions(ticker, optionType) {
       bid: Math.round((estimatedPremium * 0.98) * 100) / 100,
       ask: Math.round((estimatedPremium * 1.02) * 100) / 100,
       delta: Math.round(estimatedDelta * 1000) / 1000,
-      gamma: Math.round((0.01 / Math.sqrt(yearsToExpiration)) * 10000) / 10000,
-      theta: Math.round((-estimatedPremium / daysToExpiration) * 1000) / 1000,
-      vega: Math.round((underlyingPrice * Math.sqrt(yearsToExpiration) * 0.01) * 100) / 100,
+      gamma: Math.round((0.01 / Math.sqrt(Math.max(yearsToExpiration, 0.01))) * 10000) / 10000,
+      theta: Math.round((-estimatedPremium / Math.max(daysToExpiration, 1)) * 1000) / 1000,
+      vega: Math.round((underlyingPrice * Math.sqrt(Math.max(yearsToExpiration, 0.01)) * 0.01) * 100) / 100,
       iv: Math.round(estimatedIV * 1000) / 1000,
       volume: 0, // Not available on free tier
       openInterest: 0, // Not available on free tier

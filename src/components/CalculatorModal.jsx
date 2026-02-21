@@ -286,16 +286,18 @@ export default function CalculatorModal({ option, isOpen, onClose }) {
 
     // Score components (each 0-100, weighted)
     const scores = {
-      // Probability of profit (weight: 30%)
-      probScore: Math.min(100, probProfit * 1.2), // Boost slightly, cap at 100
+      // Probability of profit (weight: 40%) - PRIMARY FACTOR
+      // Scale: 0% prob = 0 score, 50% = 60, 80% = 96
+      probScore: Math.min(100, probProfit * 1.2),
 
-      // Risk/Reward ratio (weight: 25%)
-      // 2:1 or better is excellent, 1:1 is decent, below 0.5:1 is poor
-      rrScore: Math.min(100, riskRewardRatio * 40),
+      // Risk/Reward ratio (weight: 20%)
+      // Scale: 0.5:1 = 20, 1:1 = 40, 2:1 = 80, 2.5:1+ = 100
+      // Cap the multiplier to prevent cheap lottery tickets from dominating
+      rrScore: Math.min(100, Math.max(0, riskRewardRatio) * 40),
 
-      // Expected return (weight: 20%)
-      // Positive expected return is good
-      erScore: Math.min(100, Math.max(0, 50 + expectedReturn * 0.5)),
+      // Expected return (weight: 15%)
+      // Positive expected return is good, but cap influence
+      erScore: Math.min(100, Math.max(0, 50 + Math.min(expectedReturn, 100) * 0.5)),
 
       // Time value efficiency (weight: 15%)
       // Lower time value relative to premium = better (less theta decay risk)
@@ -311,14 +313,24 @@ export default function CalculatorModal({ option, isOpen, onClose }) {
         : Math.max(0, 100 - distanceToBreakEven * 5)
     };
 
-    // Calculate weighted total score
-    const recommendationScore = (
-      scores.probScore * 0.30 +
-      scores.rrScore * 0.25 +
-      scores.erScore * 0.20 +
+    // Calculate weighted total score (probability weighted more heavily)
+    let recommendationScore = (
+      scores.probScore * 0.40 +
+      scores.rrScore * 0.20 +
+      scores.erScore * 0.15 +
       scores.timeEfficiency * 0.15 +
       scores.breakEvenScore * 0.10
     );
+
+    // CRITICAL: Cap score based on probability thresholds
+    // High scores should require reasonable probability
+    if (probProfit < 30) {
+      recommendationScore = Math.min(recommendationScore, 45); // Max "WATCH" level
+    } else if (probProfit < 40) {
+      recommendationScore = Math.min(recommendationScore, 60);
+    } else if (probProfit < 50) {
+      recommendationScore = Math.min(recommendationScore, 75);
+    }
 
     // Determine recommendation based on score and key thresholds
     let recommendation;
