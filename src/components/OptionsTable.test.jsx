@@ -253,7 +253,7 @@ describe('OptionsTable Component', () => {
       expect(table).toBeInTheDocument();
 
       const columnHeaders = screen.getAllByRole('columnheader');
-      expect(columnHeaders.length).toBe(9); // 9 columns
+      expect(columnHeaders.length).toBe(12); // 12 columns (including Rec)
     });
 
     it('should have clickable column headers for sorting', () => {
@@ -262,7 +262,7 @@ describe('OptionsTable Component', () => {
       const columnHeaders = screen.getAllByRole('columnheader');
 
       // All headers should be in the document and clickable
-      expect(columnHeaders.length).toBe(9);
+      expect(columnHeaders.length).toBe(12);
       columnHeaders.forEach((header) => {
         expect(header).toBeInTheDocument();
       });

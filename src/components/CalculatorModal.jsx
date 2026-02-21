@@ -16,7 +16,12 @@ import {
   ChevronDown,
   Lightbulb,
   Clock,
-  Shield
+  Shield,
+  ThumbsUp,
+  ThumbsDown,
+  Eye,
+  EyeOff,
+  Sparkles
 } from 'lucide-react';
 
 /**
@@ -85,22 +90,27 @@ export default function CalculatorModal({ option, isOpen, onClose }) {
     const yearsToExpiry = option.daysToExpiration / 365;
     const riskFreeRate = 0.05; // Approximate risk-free rate
 
-    // Standard normal CDF approximation (Abramowitz & Stegun)
+    // Standard normal CDF approximation (Abramowitz & Stegun 26.2.17)
+    // Maximum error: 7.5e-8
     const normalCDF = (x) => {
-      const a1 = 0.254829592;
-      const a2 = -0.284496736;
-      const a3 = 1.421413741;
-      const a4 = -1.453152027;
-      const a5 = 1.061405429;
-      const p = 0.3275911;
+      // Handle negative values by symmetry: Φ(-x) = 1 - Φ(x)
+      if (x < 0) return 1 - normalCDF(-x);
 
-      const sign = x < 0 ? -1 : 1;
-      x = Math.abs(x);
+      // Coefficients for the rational approximation
+      const a1 = 0.319381530;
+      const a2 = -0.356563782;
+      const a3 = 1.781477937;
+      const a4 = -1.821255978;
+      const a5 = 1.330274429;
+      const p = 0.2316419;
 
       const t = 1.0 / (1.0 + p * x);
-      const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x / 2);
+      // Standard normal PDF: φ(x) = (1/√2π) * exp(-x²/2)
+      const pdf = Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
+      // Q(x) = 1 - Φ(x) ≈ φ(x) * t * (a1 + t*(a2 + t*(a3 + t*(a4 + t*a5))))
+      const Q = pdf * t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5))));
 
-      return 0.5 * (1.0 + sign * y);
+      return 1 - Q;
     };
 
     // Calculate d2 from Black-Scholes (probability of ITM in risk-neutral world)
@@ -269,6 +279,71 @@ export default function CalculatorModal({ option, isOpen, onClose }) {
       : (strike * leverageRatio / (leverageRatio + 1));
     const optionOutperformPct = ((optionOutperformPrice - underlyingPrice) / underlyingPrice) * 100;
 
+    // ========================================
+    // RECOMMENDATION ALGORITHM
+    // Scoring system based on multiple factors
+    // ========================================
+
+    // Score components (each 0-100, weighted)
+    const scores = {
+      // Probability of profit (weight: 30%)
+      probScore: Math.min(100, probProfit * 1.2), // Boost slightly, cap at 100
+
+      // Risk/Reward ratio (weight: 25%)
+      // 2:1 or better is excellent, 1:1 is decent, below 0.5:1 is poor
+      rrScore: Math.min(100, riskRewardRatio * 40),
+
+      // Expected return (weight: 20%)
+      // Positive expected return is good
+      erScore: Math.min(100, Math.max(0, 50 + expectedReturn * 0.5)),
+
+      // Time value efficiency (weight: 15%)
+      // Lower time value relative to premium = better (less theta decay risk)
+      // For deep ITM options, time value can be negative (trading at discount)
+      timeEfficiency: timeValue <= 0
+        ? 100 // Trading at intrinsic or discount - excellent
+        : Math.max(0, 100 - (timeValue / premium) * 100),
+
+      // Distance to break-even (weight: 10%)
+      // Already ITM (negative distance for calls) = better
+      breakEvenScore: distanceToBreakEven <= 0
+        ? 100 // Already past break-even
+        : Math.max(0, 100 - distanceToBreakEven * 5)
+    };
+
+    // Calculate weighted total score
+    const recommendationScore = (
+      scores.probScore * 0.30 +
+      scores.rrScore * 0.25 +
+      scores.erScore * 0.20 +
+      scores.timeEfficiency * 0.15 +
+      scores.breakEvenScore * 0.10
+    );
+
+    // Determine recommendation based on score and key thresholds
+    let recommendation;
+    let recommendationReason;
+
+    if (recommendationScore >= 65 && probProfit >= 45 && riskRewardRatio >= 0.8) {
+      recommendation = 'BUY';
+      recommendationReason = `Strong setup: ${probProfit.toFixed(0)}% profit probability with ${riskRewardRatio.toFixed(1)}:1 reward potential`;
+    } else if (recommendationScore >= 50 && probProfit >= 35) {
+      recommendation = 'WATCH';
+      recommendationReason = `Decent potential but wait for better entry. Current odds: ${probProfit.toFixed(0)}%`;
+    } else if (recommendationScore < 35 || probProfit < 25 || riskRewardRatio < 0.3) {
+      recommendation = 'DONT_WATCH';
+      recommendationReason = `Poor risk/reward profile. Only ${probProfit.toFixed(0)}% chance of profit`;
+    } else {
+      recommendation = 'WATCH';
+      recommendationReason = `Moderate opportunity. Consider if stock has strong catalyst`;
+    }
+
+    // Override to SELL if conditions are particularly unfavorable
+    if (probProfit < 20 || (riskRewardRatio < 0.25 && probProfit < 40)) {
+      recommendation = 'SELL';
+      recommendationReason = `Unfavorable odds: ${probProfit.toFixed(0)}% profit chance, ${riskRewardRatio.toFixed(2)}:1 risk/reward`;
+    }
+
     return {
       premium,
       costPerContract,
@@ -307,7 +382,12 @@ export default function CalculatorModal({ option, isOpen, onClose }) {
       timeValue,
       compareAtPrices,
       optionOutperformPrice,
-      optionOutperformPct
+      optionOutperformPct,
+      // Recommendation
+      recommendation,
+      recommendationReason,
+      recommendationScore,
+      scores
     };
   }, [option, numContracts, targetPrice]);
 
@@ -454,6 +534,113 @@ export default function CalculatorModal({ option, isOpen, onClose }) {
                 </div>
               </div>
             </div>
+
+            {/* Recommendation Banner */}
+            {calculations?.recommendation && (
+              <div className={`rounded-xl p-4 border-2 ${
+                calculations.recommendation === 'BUY'
+                  ? 'bg-gradient-to-r from-bull/20 to-neon-green/10 border-bull/50'
+                  : calculations.recommendation === 'SELL'
+                  ? 'bg-gradient-to-r from-bear/20 to-red-900/10 border-bear/50'
+                  : calculations.recommendation === 'WATCH'
+                  ? 'bg-gradient-to-r from-neon-blue/20 to-neon-purple/10 border-neon-blue/50'
+                  : 'bg-gradient-to-r from-gray-800/50 to-gray-900/50 border-gray-600/50'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {/* Recommendation Icon */}
+                    <div className={`p-3 rounded-xl ${
+                      calculations.recommendation === 'BUY'
+                        ? 'bg-bull/20'
+                        : calculations.recommendation === 'SELL'
+                        ? 'bg-bear/20'
+                        : calculations.recommendation === 'WATCH'
+                        ? 'bg-neon-blue/20'
+                        : 'bg-gray-700/50'
+                    }`}>
+                      {calculations.recommendation === 'BUY' && <ThumbsUp className="w-6 h-6 text-bull" />}
+                      {calculations.recommendation === 'SELL' && <ThumbsDown className="w-6 h-6 text-bear" />}
+                      {calculations.recommendation === 'WATCH' && <Eye className="w-6 h-6 text-neon-blue" />}
+                      {calculations.recommendation === 'DONT_WATCH' && <EyeOff className="w-6 h-6 text-gray-500" />}
+                    </div>
+
+                    {/* Recommendation Text */}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xl font-bold ${
+                          calculations.recommendation === 'BUY'
+                            ? 'text-bull'
+                            : calculations.recommendation === 'SELL'
+                            ? 'text-bear'
+                            : calculations.recommendation === 'WATCH'
+                            ? 'text-neon-blue'
+                            : 'text-gray-500'
+                        }`}>
+                          {calculations.recommendation === 'DONT_WATCH' ? "DON'T WATCH" : calculations.recommendation}
+                        </span>
+                        <Sparkles className={`w-4 h-4 ${
+                          calculations.recommendation === 'BUY' ? 'text-bull' :
+                          calculations.recommendation === 'WATCH' ? 'text-neon-blue' :
+                          'text-gray-600'
+                        }`} />
+                      </div>
+                      <p className="text-sm text-gray-400 mt-0.5">
+                        {calculations.recommendationReason}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Score */}
+                  <div className="text-right">
+                    <div className="text-xs text-gray-500 mb-1">Score</div>
+                    <div className={`text-2xl font-bold ${
+                      calculations.recommendationScore >= 65 ? 'text-bull' :
+                      calculations.recommendationScore >= 50 ? 'text-neon-blue' :
+                      calculations.recommendationScore >= 35 ? 'text-risk-medium' :
+                      'text-bear'
+                    }`}>
+                      {calculations.recommendationScore.toFixed(0)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Score Breakdown */}
+                <div className="mt-4 pt-3 border-t border-white/10">
+                  <div className="grid grid-cols-5 gap-2 text-xs">
+                    <div className="text-center">
+                      <div className="text-gray-500 mb-1">Prob</div>
+                      <div className={`font-mono font-medium ${calculations.scores.probScore >= 60 ? 'text-bull' : calculations.scores.probScore >= 40 ? 'text-neon-blue' : 'text-bear'}`}>
+                        {calculations.scores.probScore.toFixed(0)}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-gray-500 mb-1">R/R</div>
+                      <div className={`font-mono font-medium ${calculations.scores.rrScore >= 60 ? 'text-bull' : calculations.scores.rrScore >= 40 ? 'text-neon-blue' : 'text-bear'}`}>
+                        {calculations.scores.rrScore.toFixed(0)}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-gray-500 mb-1">E[R]</div>
+                      <div className={`font-mono font-medium ${calculations.scores.erScore >= 60 ? 'text-bull' : calculations.scores.erScore >= 40 ? 'text-neon-blue' : 'text-bear'}`}>
+                        {calculations.scores.erScore.toFixed(0)}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-gray-500 mb-1">Time</div>
+                      <div className={`font-mono font-medium ${calculations.scores.timeEfficiency >= 60 ? 'text-bull' : calculations.scores.timeEfficiency >= 40 ? 'text-neon-blue' : 'text-bear'}`}>
+                        {calculations.scores.timeEfficiency.toFixed(0)}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-gray-500 mb-1">B/E</div>
+                      <div className={`font-mono font-medium ${calculations.scores.breakEvenScore >= 60 ? 'text-bull' : calculations.scores.breakEvenScore >= 40 ? 'text-neon-blue' : 'text-bear'}`}>
+                        {calculations.scores.breakEvenScore.toFixed(0)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Investment Summary */}
             <div className="bg-gradient-to-br from-neon-purple/10 via-trading-card to-neon-blue/10 border border-neon-purple/30 rounded-xl overflow-hidden">

@@ -7,9 +7,119 @@ import {
   AlertTriangle,
   Zap,
   Activity,
-  Calculator
+  Calculator,
+  ThumbsUp,
+  ThumbsDown,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { calculateRiskLevel } from '../services/optionsApi';
+
+/**
+ * Calculate recommendation for an option
+ * Returns: 'BUY' | 'SELL' | 'WATCH' | 'DONT_WATCH'
+ */
+const calculateRecommendation = (option) => {
+  if (!option) return { recommendation: null, score: 0 };
+
+  const premium = option.premium || option.ask || 0;
+  const strike = option.strike;
+  const underlyingPrice = option.underlyingPrice;
+  const isCall = option.optionType === 'call';
+  const iv = option.iv || 0.3;
+  const yearsToExpiry = option.daysToExpiration / 365;
+  const riskFreeRate = 0.05;
+
+  // Standard normal CDF approximation
+  const normalCDF = (x) => {
+    if (x < 0) return 1 - normalCDF(-x);
+    const a1 = 0.319381530, a2 = -0.356563782, a3 = 1.781477937;
+    const a4 = -1.821255978, a5 = 1.330274429, p = 0.2316419;
+    const t = 1.0 / (1.0 + p * x);
+    const pdf = Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
+    return 1 - pdf * t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5))));
+  };
+
+  // Calculate d2 from Black-Scholes
+  const calcD2 = (S, K, vol, T) => {
+    if (T <= 0 || vol <= 0) return 0;
+    return (Math.log(S / K) + (riskFreeRate - vol * vol / 2) * T) / (vol * Math.sqrt(T));
+  };
+
+  // Break-even price
+  const breakEven = isCall ? strike + premium : strike - premium;
+
+  // Distance to break-even
+  const distanceToBreakEven = isCall
+    ? ((breakEven - underlyingPrice) / underlyingPrice) * 100
+    : ((underlyingPrice - breakEven) / underlyingPrice) * 100;
+
+  // Probability of profit
+  const calcProbReachingPrice = (target) => {
+    if (yearsToExpiry <= 0 || iv <= 0) return 50;
+    const d2 = calcD2(underlyingPrice, target, iv, yearsToExpiry);
+    const probAbove = normalCDF(d2) * 100;
+    return isCall ? probAbove : (100 - probAbove);
+  };
+  const probProfit = calcProbReachingPrice(breakEven);
+
+  // Expected move and profit potential
+  const expectedMove = underlyingPrice * iv * Math.sqrt(yearsToExpiry);
+  const oneSigmaTarget = isCall ? underlyingPrice + expectedMove : underlyingPrice - expectedMove;
+  const intrinsicAtTarget = isCall
+    ? Math.max(0, oneSigmaTarget - strike)
+    : Math.max(0, strike - oneSigmaTarget);
+  const profitAtTarget = intrinsicAtTarget * 100 - premium * 100;
+  const riskRewardRatio = premium > 0 ? profitAtTarget / (premium * 100) : 0;
+
+  // Current intrinsic and time value
+  const currentIntrinsic = isCall
+    ? Math.max(0, underlyingPrice - strike)
+    : Math.max(0, strike - underlyingPrice);
+  const timeValue = premium - currentIntrinsic;
+
+  // Calculate expected return
+  const avgProfitIfWin = Math.max(0, profitAtTarget);
+  const expectedValue = (probProfit / 100 * avgProfitIfWin) - ((100 - probProfit) / 100 * premium * 100);
+  const expectedReturn = premium > 0 ? (expectedValue / (premium * 100)) * 100 : 0;
+
+  // Score components
+  const scores = {
+    probScore: Math.min(100, probProfit * 1.2),
+    rrScore: Math.min(100, Math.max(0, riskRewardRatio) * 40),
+    erScore: Math.min(100, Math.max(0, 50 + expectedReturn * 0.5)),
+    timeEfficiency: timeValue <= 0 ? 100 : Math.max(0, 100 - (timeValue / premium) * 100),
+    breakEvenScore: distanceToBreakEven <= 0 ? 100 : Math.max(0, 100 - distanceToBreakEven * 5)
+  };
+
+  // Calculate weighted score
+  const score = (
+    scores.probScore * 0.30 +
+    scores.rrScore * 0.25 +
+    scores.erScore * 0.20 +
+    scores.timeEfficiency * 0.15 +
+    scores.breakEvenScore * 0.10
+  );
+
+  // Determine recommendation
+  let recommendation;
+  if (score >= 65 && probProfit >= 45 && riskRewardRatio >= 0.8) {
+    recommendation = 'BUY';
+  } else if (score >= 50 && probProfit >= 35) {
+    recommendation = 'WATCH';
+  } else if (score < 35 || probProfit < 25 || riskRewardRatio < 0.3) {
+    recommendation = 'DONT_WATCH';
+  } else {
+    recommendation = 'WATCH';
+  }
+
+  // Override to SELL if particularly unfavorable
+  if (probProfit < 20 || (riskRewardRatio < 0.25 && probProfit < 40)) {
+    recommendation = 'SELL';
+  }
+
+  return { recommendation, score };
+};
 
 /**
  * OptionsTable Component
@@ -77,6 +187,7 @@ export default function OptionsTable({ options, isLoading, onCalculate }) {
     { key: 'optionType', label: 'Type', align: 'center' },
     { key: 'strike', label: 'Strike', align: 'right' },
     { key: 'premium', label: 'Price', align: 'right' },
+    { key: 'recommendation', label: 'Rec', align: 'center', noSort: true },
     { key: 'score', label: 'Score', align: 'right' },
     { key: 'delta', label: 'Delta', align: 'right' },
     { key: 'iv', label: 'IV', align: 'right' },
@@ -85,6 +196,52 @@ export default function OptionsTable({ options, isLoading, onCalculate }) {
     { key: 'risk', label: 'Risk', align: 'center' },
     { key: 'calc', label: '', align: 'center', noSort: true }
   ];
+
+  // Recommendation badge component
+  const RecommendationBadge = ({ option }) => {
+    const { recommendation, score } = calculateRecommendation(option);
+
+    if (!recommendation) return <span className="text-gray-600">—</span>;
+
+    const config = {
+      BUY: {
+        bg: 'bg-bull/20',
+        text: 'text-bull',
+        icon: ThumbsUp,
+        label: 'BUY'
+      },
+      SELL: {
+        bg: 'bg-bear/20',
+        text: 'text-bear',
+        icon: ThumbsDown,
+        label: 'SELL'
+      },
+      WATCH: {
+        bg: 'bg-neon-blue/20',
+        text: 'text-neon-blue',
+        icon: Eye,
+        label: 'WATCH'
+      },
+      DONT_WATCH: {
+        bg: 'bg-gray-700/50',
+        text: 'text-gray-500',
+        icon: EyeOff,
+        label: 'SKIP'
+      }
+    };
+
+    const { bg, text, icon: Icon, label } = config[recommendation];
+
+    return (
+      <div className="flex flex-col items-center gap-0.5">
+        <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${bg} ${text}`}>
+          <Icon className="w-3 h-3" />
+          {label}
+        </span>
+        <span className="text-[10px] text-gray-500 font-mono">{score.toFixed(0)}</span>
+      </div>
+    );
+  };
 
   // Risk badge component
   const RiskBadge = ({ delta, iv }) => {
@@ -253,6 +410,11 @@ export default function OptionsTable({ options, isLoading, onCalculate }) {
                     <span className="font-mono text-neon-green font-medium">
                       ${option.premium.toFixed(2)}
                     </span>
+                  </td>
+
+                  {/* Recommendation */}
+                  <td className="px-4 py-3 text-center">
+                    <RecommendationBadge option={option} />
                   </td>
 
                   {/* Score */}

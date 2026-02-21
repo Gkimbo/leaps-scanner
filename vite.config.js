@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Base path for GitHub Pages - set to repo name for project pages
+  // Change '/leaps-scanner/' to your repo name if different
+  base: process.env.GITHUB_ACTIONS ? '/leaps-scanner/' : '/',
   plugins: [react(), tailwindcss()],
   test: {
     globals: true,
